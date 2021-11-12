@@ -64,3 +64,6 @@ CREATE TABLE dependents (
 	employee_id INT NOT NULL,
 	FOREIGN KEY (employee_id) REFERENCES employees (employee_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+--changeset Tony:1004
+alter table jobs add job_level VARCHAR (8)
