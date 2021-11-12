@@ -1,0 +1,14 @@
+version: 0.0
+os: windows
+files:
+  - source: /_PublishedWebsites
+    destination: C:\inetpub\temp
+hooks:
+  BeforeInstall:
+    - location: before-appspec.ps1
+      timeout: 500
+      runas: root
+  AfterInstall:
+    - location: install-appspec.ps1
+      timeout: 1000
+      runas: root

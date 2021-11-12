@@ -1,0 +1,836 @@
+AWSTemplateFormatVersion: '2010-09-09'
+###############################################################################################
+###################################    Input Parameters    ####################################
+###############################################################################################
+Parameters:
+ ##############################  Common Parameters  #############################
+  ApplicationName:
+    Type: String
+    Description: Label Name for the pipeline and application resources
+    Default: xxxxxxxxCamelCaseAppName 
+  BuildEnvironment:
+    Type: String
+    Description: Build Environment Option prepending to the files to help choose in the repository
+    Default: dev
+ #############################  Pipeline Parameters  ############################
+  CodeRepo:
+    Type: String
+    Description: GITHUB Repo Name 
+    Default: xxxxxxxxxxxapplication-migration-template
+  repoCloneURL:
+    Type: String
+    Description: GITHUB GIT Pull
+    Default: xxxxxxxxxxxxxxxxxxxhttps://github.com/azdot/application-migration-template
+  CodeRelease:
+    Type: String
+    Description: 'Release of the code, which may not be the same as the branch or the environment'
+    Default: Dev
+    AllowedValues:
+      - Dev
+      - prod
+      - Release
+      - Debug
+      - Development
+      - Test
+      - UAT
+  Branch:
+    Type: String
+    Description: GITHUB Branch
+    Default: development
+  CodeBuildEnvironmentImage:
+    Type: String
+    Description: Code Build Environment build Image
+    Default: 'mcr.microsoft.com/dotnet/framework/sdk:4.8'
+  TargetAccountInfraRegion:
+    Type: String
+    Description: The region to deploy the AWS infra into in the target account
+    Default: us-west-2
+  DatabaseName:
+    Type: String
+    Description: The database name for the application if found, multiple denotes more than one database connection.
+    Default: PLACEHOLDER_DB_NAME
+  SqlServerInstance:
+    Type: String
+    Description: The SQL Server instance IP.
+    Default: 10.166.26.213
+  SolutionPath:
+    Type: String
+    Description: The path where the .net solution is located.
+  ProjectName:
+    Type: String
+    Description: The Visual Studio project name.
+  AzDotInstallerBucket:
+    Type: String
+    Description: The S3 Bucket Name containing binaries that need to be installed.
+    Default: azdot-infrastructure-dev-s3-installers
+  AzDotCertBucket:
+    Type: String
+    Description: The S3 Bucket Name containing certificates that need to be installed.
+    Default: azdotdevelopmentdefault-infrastructure-dev-s3-certs
+  SSMCertParam:
+    Type: String
+    Description: The common name for ssl cert username and password.
+ ###############################  EC2 Parameters  ###############################
+  Ec2Name:
+    Type: String
+    Description: Name of the EC2 and Domain registered name
+    Default: AZUTRCS00101
+  ADDirectoryOU:
+    Type: String
+    Description: Active Directory OU to place servers in
+    Default: "OU=azdot-production-default,DC=dot,DC=state,DC=az"
+  ADDirectoryId:
+    Type: String
+    Description: Directory ID of AWS MAD used for domain joins
+    Default: d-926708e65e
+  ADDirectoryName:
+    Type: String
+    Description: FQDN of Active Directory domain
+    Default: azdotdevelop.com
+  ADDnsIpAddresses1:
+    Type: String
+    Description: IP address of the first AD integrated DNS server
+    Default: 10.166.66.79
+  ADDnsIpAddresses2:
+    Type: String
+    Description: IP address of the second AD integrated DNS server
+    Default: 10.166.132.169
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t3.nano
+    ConstraintDescription: must be a valid EC2 instance type.
+  BillingEmail:
+    Type: String
+    Description: email to send billing alerts
+    Default: cloudbilling+corporate@azdot.gov
+  KeyPair:
+    Type: String
+    Description: Name of SSH Key Pair
+    Default: SQLServer-${BuildEnvironment}-accesskey-keypair
+  SSLArn:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: SSL Cert for Load Balancer
+    Default: /sslcert/web/${BuildEnvironment}/domainacm/password
+  VPCCidr:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: CIDR of the VPC
+    Default: /server/compute/${BuildEnvironment}/vpc/vpccird
+  PrivateSubnetLBa:
+    Description: Public Subnet for the LB to be placed in
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /server/compute/${BuildEnvironment}/vpc/privatesubnet-${BuildEnvironment}-internallb-us-west-2a
+  PrivateSubnetLBb:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: Private Subnet for the LB to be placed in
+    Default: /server/compute/${BuildEnvironment}/vpc/privatesubnet-${BuildEnvironment}-internallb-us-west-2a
+  SubnetCompute:
+    Description: Compute Subnet for EC2 to be placed in
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /server/compute/${BuildEnvironment}/vpc/privatesubnet-internalweb-us-west-2a
+  SubnetCompute2:
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Description: Second Compute Subnet for EC2 to be placed in (for apps that require it)
+    Default: /server/compute/${BuildEnvironment}/vpc/privatesubnet-internalweb-us-west-2b
+  VPCCompute:
+    Description: Compute Subnet to be placed
+    Type: "AWS::SSM::Parameter::Value<String>"
+    Default: /server/compute/${BuildEnvironment}/vpc/vpc
+  LatestAmiId:
+    Description: SSM Parameter containing and AMI ID.  This can be an AWS managed SSM parameter.
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: /aws/service/ami-windows-latest/Windows_Server-2019-English-Full-Base
+ ###############################  Resource Tags  ################################
+  TagTechnicalOwner:
+    Type: String 
+    Default: itg-cloud
+  TagServiceType: 
+    Type: String 
+    Default: custom-dotnet40
+  TagServiceName: 
+    Type: String 
+    Default: web
+  TagOrchestration: 
+    Type: String 
+    Default: cloud-formation
+  TagExpectedTraffic: 
+    Type: String 
+    Default: internal_inbound
+  TagCostCenter: 
+    Type: String 
+    Default: awards-recognition
+  TagAvailablity: 
+    Type: String 
+    Default: none
+  TagCustomer: 
+    Type: String 
+    Default: awards-recognition
+  TagSchedule: 
+    Type: String 
+    Default: Always
+
+###############################################################################################
+###################################    Deploy Conditions   ####################################
+###############################################################################################    
+Conditions:
+  ProtectProdResources:
+    Fn::Equals: [Ref: BuildEnvironment, prod]
+  ProtectDevResources:
+    Fn::Equals: [Ref: BuildEnvironment, dev]
+
+###############################################################################################
+################################    Resources Infrastructure    ###############################
+###############################################################################################
+Resources:
+ #################################    EC2 Infrastructure    ###################################
+  ComputeSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Ref: Ec2Name
+        - Key: technical-owner
+          Value: 
+            Ref: TagTechnicalOwner
+        - Key: service-type
+          Value: 
+            Ref: TagServiceType
+        - Key: service-name
+          Value: 
+            Ref: TagServiceName
+        - Key: orchestration
+          Value: 
+            Ref: TagOrchestration
+        - Key: expected-traffic
+          Value: 
+            Ref: TagExpectedTraffic
+        - Key: environment
+          Value:
+            Ref: BuildEnvironment
+        - Key: cost-center
+          Value:       
+            Ref: TagCostCenter
+        - Key: availability
+          Value:       
+            Ref: TagAvailablity
+        - Key: customer
+          Value: 
+            Ref: TagCustomer
+        - Key: Schedule
+          Value: 
+            Ref: TagSchedule
+      VpcId:
+        Ref: VPCCompute
+      GroupDescription: "Enable RDP , and all elated ports except web interface"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 
+            Ref: VPCCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 
+            Ref: VPCCidr
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 10.207.134.0/23
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 10.207.132.0/23
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 10.249.208.0/22
+  LBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      Tags:
+        - Key: Name
+          Value:
+            Ref: Ec2Name
+        - Key: technical-owner
+          Value: 
+            Ref: TagTechnicalOwner
+        - Key: service-type
+          Value: 
+            Ref: TagServiceType
+        - Key: service-name
+          Value: 
+            Ref: TagServiceName
+        - Key: orchestration
+          Value: 
+            Ref: TagOrchestration
+        - Key: expected-traffic
+          Value: 
+            Ref: TagExpectedTraffic
+        - Key: environment
+          Value:
+            Ref: BuildEnvironment
+        - Key: cost-center
+          Value:       
+            Ref: TagCostCenter
+        - Key: availability
+          Value:       
+            Ref: TagAvailablity
+        - Key: customer
+          Value: 
+            Ref: TagCustomer
+        - Key: Schedule
+          Value: 
+            Ref: TagSchedule
+      VpcId:
+        Ref: VPCCompute
+      GroupDescription: "Enable RDP , and all elated ports except web interface"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  ApplicationBudget:
+    Type: "AWS::Budgets::Budget"
+    Properties:
+      Budget:
+        BudgetLimit:
+          Amount: 100
+          Unit: USD
+        CostFilters:
+          AZ:
+            - us-east-1
+            - us-west-1
+            - us-east-2
+            - us-west-2
+          TagKeyValue:
+            - Fn::Join:
+                - ""
+                - - service-name$
+                  - Ref: ApplicationName
+        TimeUnit: MONTHLY
+        TimePeriod:
+          Start: "1599604652"
+          End: "1662676652"
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 70
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address:
+                Ref: BillingEmail
+  ComputeEC2LifecyclePolicy:
+    Type: "AWS::DLM::LifecyclePolicy"
+    Properties:
+      Description: Lifecycle Policy using CloudFormation for EC2 Application
+      State: ENABLED
+      ExecutionRoleArn:
+        Fn::Join:
+          - ""
+          - - "arn:aws:iam::"
+            - Ref: "AWS::AccountId"
+            - ":role/service-role/AWSDataLifecycleManagerDefaultRole"
+      PolicyDetails:
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          - Key: service-name
+            Value:
+              Ref: ApplicationName
+        Schedules:
+          - TagsToAdd:
+              - Key: technical-owner
+                Value: 
+                  Ref: TagTechnicalOwner
+              - Key: service-type
+                Value: 
+                  Ref: TagServiceType
+              - Key: service-name
+                Value: 
+                  Ref: ApplicationName
+              - Key: deployment-target
+                Value:
+                  Fn::Join:
+                    - ""
+                    - - Ref: ApplicationName
+                      - "-"
+                      - Ref: BuildEnvironment
+              - Key: Name
+                Value:
+                  Ref: Ec2Name
+              - Key: orchestration
+                Value: 
+                  Ref: TagOrchestration
+              - Key: expected-traffic
+                Value: 
+                  Ref: TagExpectedTraffic
+              - Key: environment
+                Value:
+                  Ref: BuildEnvironment
+              - Key: cost-center
+                Value:       
+                  Ref: TagCostCenter
+              - Key: availability
+                Value:       
+                  Ref: TagAvailablity
+              - Key: customer
+                Value: 
+                  Ref: TagCustomer
+              - Key: type
+                Value: WeeklySnapshot
+            Name: Weekly Snapshots
+            CreateRule:
+              CronExpression: "cron(0 0 ? * SUN *)"
+            RetainRule:
+              Count: 1
+            CopyTags: true
+  ClassicLoadBalancerPrivate:
+    Type: "AWS::ElasticLoadBalancing::LoadBalancer"
+    Properties:
+      Instances:
+        - Ref: Ec2Instance
+      SecurityGroups:
+        - Ref: LBSecurityGroup
+      Subnets:
+        - Ref: PrivateSubnetLBa
+        - Ref: PrivateSubnetLBb
+      CrossZone: true
+      Scheme: internal
+      LoadBalancerName:
+        Fn::Sub: "${ApplicationName}-elb-private"
+      Listeners:
+        - LoadBalancerPort: "80"
+          InstancePort: "80"
+          Protocol: TCP
+        - InstancePort: "443"
+          InstanceProtocol: SSL
+          LoadBalancerPort: "443"
+          Protocol: SSL
+          SSLCertificateId:
+            Ref: SSLArn
+      HealthCheck:
+        Target: "TCP:80"
+        HealthyThreshold: "3"
+        UnhealthyThreshold: "5"
+        Interval: "30"
+        Timeout: "5"
+      Tags:
+        - Key: technical-owner
+          Value: 
+            Ref: TagTechnicalOwner
+        - Key: service-type
+          Value: 
+            Ref: TagServiceType
+        - Key: service-name
+          Value: 
+            Ref: ApplicationName
+        - Key: deployment-target
+          Value:
+            Fn::Join:
+              - ""
+              - - Ref: ApplicationName
+                - "-"
+                - Ref: BuildEnvironment
+        - Key: Name
+          Value:
+            Ref: Ec2Name
+        - Key: orchestration
+          Value: 
+            Ref: TagOrchestration
+        - Key: expected-traffic
+          Value: 
+            Ref: TagExpectedTraffic
+        - Key: environment
+          Value:
+            Ref: BuildEnvironment
+        - Key: cost-center
+          Value:       
+            Ref: TagCostCenter
+        - Key: availability
+          Value:       
+            Ref: TagAvailablity
+        - Key: customer
+          Value: 
+            Ref: TagCustomer
+  Ec2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      DisableApiTermination:
+        Fn::If:
+          [
+            ProtectProdResources,
+            true,
+            Fn::If: [ProtectDevResources, false, true],
+          ]
+      ImageId:
+        Ref: LatestAmiId
+      KeyName:
+        Ref: KeyPair
+      IamInstanceProfile:
+        Fn::Sub: "{{resolve:ssm:/server/security/${BuildEnvironment}/iam/EC2InstanceProfile:1}}"
+      InstanceType:
+        Ref: InstanceType
+      NetworkInterfaces:
+        - GroupSet:
+            - Ref: ComputeSecurityGroup
+          DeviceIndex: "0"
+          SubnetId:
+            Ref: SubnetCompute
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            DeleteOnTermination: false
+            Encrypted: true
+      Tags:
+        - Key: technical-owner
+          Value: 
+            Ref: TagTechnicalOwner
+        - Key: service-type
+          Value: 
+            Ref: TagServiceType
+        - Key: service-name
+          Value: 
+            Ref: ApplicationName
+        - Key: deployment-target
+          Value:
+            Fn::Join:
+              - ""
+              - - Ref: ApplicationName
+                - "-"
+                - Ref: BuildEnvironment
+        - Key: Name
+          Value:
+            Ref: Ec2Name
+        - Key: orchestration
+          Value: 
+            Ref: TagOrchestration
+        - Key: expected-traffic
+          Value: 
+            Ref: TagExpectedTraffic
+        - Key: environment
+          Value:
+            Ref: BuildEnvironment
+        - Key: cost-center
+          Value:       
+            Ref: TagCostCenter
+        - Key: availability
+          Value:       
+            Ref: TagAvailablity
+        - Key: customer
+          Value: 
+            Ref: TagCustomer
+        - Key: Patch Group
+          Value:
+            Ref: BuildEnvironment
+        - Key: Schedule 
+          Value: 
+            Ref: TagSchedule
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            <powershell>
+            Rename-Computer -NewName '${Ec2Name}' -Restart
+            </powershell>
+  ADJoinInstanceIdAssociation:
+    Type: "AWS::SSM::Association"
+    Properties:
+      AssociationName:
+        Fn::Join:
+          - ""
+          - - Ref: ApplicationName
+            - "-"
+            - Ref: BuildEnvironment
+            - JoinDomain
+      Name: AWS-JoinDirectoryServiceDomain
+      Parameters:
+        directoryId:
+          - Ref: ADDirectoryId
+        directoryName:
+          - Ref: ADDirectoryName
+        directoryOU:
+          - Ref: ADDirectoryOU
+        dnsIpAddresses:
+          - Ref: ADDnsIpAddresses1
+          - Ref: ADDnsIpAddresses2
+      Targets:
+        - Key: "tag:deployment-target"
+          Values:
+            - Fn::Join:
+                - ""
+                - - Ref: ApplicationName
+                  - "-"
+                  - Ref: BuildEnvironment
+      WaitForSuccessTimeoutSeconds: 300
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+      LogGroupName:
+        Fn::Join:
+          - ""
+          - - Ref: ApplicationName
+            - "-"
+            - Ref: BuildEnvironment
+
+ ################################    Pipeline Infrastructure    ###############################
+  CodeDeployApplication:
+    Type: 'AWS::CodeDeploy::Application'
+    Properties:
+      ApplicationName:
+        Ref: ApplicationName
+      ComputePlatform: Server
+  ApplicationDeploymentGroup:
+    Type: 'AWS::CodeDeploy::DeploymentGroup'
+    Properties:
+      ApplicationName:
+        Ref: CodeDeployApplication
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      Ec2TagFilters:
+        - 
+          Key: deployment-target
+          Value:
+            'Fn::Join':
+              - ''
+              - 
+                - 
+                  Ref: ApplicationName
+                - '-'
+                - 
+                  Ref: BuildEnvironment
+          Type: KEY_AND_VALUE
+      ServiceRoleArn:
+        Fn::Sub: "{{resolve:ssm:/server/security/${BuildEnvironment}/iam/CodeDeployTrust-RoleId:1}}"
+  AppCodePipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      RoleArn:
+        'Fn::Join':
+          - ''
+          - 
+            - 'arn:aws:iam::'
+            - 
+              Ref: 'AWS::AccountId'
+            - ':role/infrastructure-'
+            - 
+              Ref: BuildEnvironment
+            - '-IAMRole-CICD'
+      Stages:
+        - 
+          Name: Source
+          Actions:
+            - 
+              Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: CodeStarSourceConnection
+              Configuration:
+                ConnectionArn: 
+                  Fn::Sub: "{{resolve:ssm:/github/${BuildEnvironment}/codebuild/codestarconnection:1}}"
+                FullRepositoryId: 
+                  Fn::Join:
+                    - "" 
+                    - 
+                      - azdot
+                      - "/"
+                      - Ref: CodeRepo
+                BranchName:
+                  Ref: Branch
+              OutputArtifacts:
+                - 
+                  Name: SourceOutput
+              RunOrder: 1
+        - 
+          Name: Infrastructure_Deploy
+          Actions:
+            - 
+              Name: BuildAction_CFT
+              Region:
+                Ref: TargetAccountInfraRegion
+              InputArtifacts:
+                - 
+                  Name: SourceOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CloudFormation
+              RunOrder: 2
+              Configuration:
+                Capabilities: 'CAPABILITY_AUTO_EXPAND,CAPABILITY_NAMED_IAM,CAPABILITY_IAM'
+                ActionMode: CREATE_UPDATE
+                TemplatePath: 'SourceOutput::infrastructure/common/cloudformations/infrastructure-cft-${ApplicationName}.yaml'
+                TemplateConfiguration:
+                  'Fn::Sub': 'SourceOutput::infrastructure/${BuildEnvironment}/infrastructure-cft-${ApplicationName}-param.json'
+                StackName:
+                  'Fn::Sub': '${ApplicationName}-${BuildEnvironment}-ec2-application'
+                RoleArn:
+                  Fn::Sub: "{{resolve:ssm:/server/security/${BuildEnvironment}/iam/CICD-RoleId:1}}"
+              RoleArn:
+                Fn::Sub: "{{resolve:ssm:/server/security/${BuildEnvironment}/iam/CICD-RoleId:1}}"
+        - 
+          Name: Build
+          Actions:
+            - 
+              Name: BuildAction
+              Region:
+                Ref: TargetAccountInfraRegion
+              InputArtifacts:
+                - 
+                  Name: SourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              RunOrder: 3
+              OutputArtifacts:
+                - 
+                  Name: BuildArtifact
+              Configuration:
+                ProjectName:
+                  Ref: AppCodeBuild
+        - 
+          Name: DeploytoEC2
+          Actions:
+            - 
+              Name: BuildActiontoEC2
+              Region:
+                Ref: TargetAccountInfraRegion
+              InputArtifacts:
+                - 
+                  Name: BuildArtifact
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: CodeDeploy
+              RunOrder: 4
+              Configuration:
+                ApplicationName:
+                  Ref: CodeDeployApplication
+                DeploymentGroupName:
+                  Ref: ApplicationDeploymentGroup
+      ArtifactStore:
+        EncryptionKey:
+          Id:
+            Fn::Sub: "{{resolve:ssm:/server/security/${BuildEnvironment}/kms/CodePipelineKMSKey:1}}"
+          Type: KMS
+        Type: S3
+        Location:
+          Fn::Sub: azdot-${BuildEnvironment}-pipeline-s3-artifactstore
+      Tags:
+        - Key: technical-owner
+          Value: infrastructure-protection
+        - Key: service-type
+          Value: infrastructure
+        - Key: service-name
+          Value: infrastructure
+        - Key: orchestration
+          Value: cloud-formation
+        - Key: expected-traffic
+          Value: internal_inbound
+        - Key: environment
+          Value:
+            Ref: BuildEnvironment
+        - Key: cost-center
+          Value: infrastructure-protection
+        - Key: availability
+          Value: none
+        - Key: customer
+          Value: infrastructure-protection
+        - Key: availability
+          Value: none
+  AppCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name:
+        'Fn::Sub': '${CodeRepo}-${BuildEnvironment}-codebuild-project'
+      ServiceRole:
+        Fn::Sub: "{{resolve:ssm:/server/security/${BuildEnvironment}/iam/CICD-RoleId:1}}"
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        PrivilegedMode: false
+        Type: WINDOWS_SERVER_2019_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image:
+          Ref: CodeBuildEnvironmentImage
+        EnvironmentVariables:
+          - 
+            Name: GITHUBTOKEN
+            Type: PARAMETER_STORE
+            Value:
+              Fn::Sub: "/github/${BuildEnvironment}/codebuild/readpackages"
+          - 
+            Name: CURRENT_RELEASE
+            Type: PLAINTEXT
+            Value:
+              Ref: CodeRelease
+          - 
+            Name: BUILD_ENVIRONMENT
+            Type: PLAINTEXT
+            Value:
+              Ref: BuildEnvironment
+          - 
+            Name: SSM_PASSWORD_KEY
+            Type: PLAINTEXT
+            Value: 
+              Fn::Sub: '/dba/beco_goals/${BuildEnvironment}/sql_server/login/utracs_user/password'
+          - 
+            Name: SSM_USERNAME_KEY
+            Type: PLAINTEXT
+            Value: 
+              Fn::Sub: '/dba/beco_goals/${BuildEnvironment}/sql_server/login/utracs_user/username'
+          - 
+            Type: PLAINTEXT
+            Name: SQL_SERVER
+            Value:
+              Ref: SqlServerInstance
+          - 
+            Name: DATABASE_NAME
+            Type: PLAINTEXT
+            Value:
+              Ref: DatabaseName
+          - 
+            Name: SOLUTIONPATH
+            Type: PLAINTEXT
+            Value:
+              Ref: SolutionPath
+          - 
+            Name: PROJECTNAME
+            Type: PLAINTEXT
+            Value:
+              Ref: ProjectName
+          - 
+            Name: AZDOTCERTBUCKET
+            Type: PLAINTEXT
+            Value:
+              Ref: AzDotCertBucket
+          - 
+            Name: AZDOTINSTALLERBUCKET
+            Type: PLAINTEXT
+            Value:
+              Ref: AzDotInstallerBucket
+          - 
+            Value: 
+              Ref: SSMCertParam
+            Name: SSMCERTPARAM
+          
+      Source:
+        Type: GITHUB
+        Location:
+          Ref: repoCloneURL
+        BuildSpec: 'infrastructure\common\pipelines\buildspec.yml'
+      TimeoutInMinutes: 20
+  

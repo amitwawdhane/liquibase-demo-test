@@ -1,0 +1,42 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - Write-Output "Setup Nuget Package manager"
+      - $f = 'infrastructure/common/NuGet.config'
+      - (Get-Content $f -Raw).Replace('{{github}}', $env:GITHUBTOKEN) | Set-Content $f
+      - Copy-Item $f -Destination "C:\codebuild\"
+      - Write-Output "Download NuGet packages as defined in packages.config"
+      - nuget restore $env:SOLUTIONPATH -ConfigFile C:\codebuild\Nuget.config -OutputDirectory app\src\packages
+      - Write-Output "Doing prebuilds"
+      - $f = "infrastructure/common/pipelines/before-appspec.ps1"
+      #- Write-Output $f
+      - (Get-Content $f -Raw).Replace('{{ProjectName}}', $env:PROJECTNAME) | Set-Content $f
+      - $f = "infrastructure/common/pipelines/install-appspec.ps1"
+      #- Write-Output $f
+      - (Get-Content $f -Raw).Replace('{{ProjectName}}', $env:PROJECTNAME) | Set-Content $f 
+      - (Get-Content $f -Raw).Replace('{{azdot-s3-installers-bucket}}', ${AZDOTINSTALLERBUCKET}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{azdot-s3-cert-bucket}}', ${AZDOTCERTBUCKET}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{SSM_PASSWORD_KEY}}', ${SSM_PASSWORD_KEY}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{SSM_USERNAME_KEY}}', ${SSM_USERNAME_KEY}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{SQL_SERVER}}', ${SQL_SERVER}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{DATABASE_NAME}}', ${DATABASE_NAME}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{BuildEnvironment}}', ${BUILD_ENVIRONMENT}) | Set-Content $f
+      - (Get-Content $f -Raw).Replace('{{SSMCERTPARAM}}', ${SSMCERTPARAM}) | Set-Content $f
+       
+     
+  build:
+    commands:
+      - Write-Output "Current directory under Build"
+      - Write-Output $env:PROJECTNAME
+      - Write-Output ${BUILD_ENVIRONMENT}
+      - msbuild app\src\$env:PROJECTNAME.sln /p:DeployIisAppPath=$env:PROJECTNAME /p:Configuration=Release /p:RestoreSources= /p:PackageAsSingleFile=false /p:OutDir=C:\codebuild\artifacts\
+      - Copy-Item "infrastructure/common/pipelines/appspec.yml" -Destination "C:\codebuild\artifacts\appspec.yml"
+      - Copy-Item "infrastructure/common/pipelines/install-appspec.ps1" -Destination "C:\codebuild\artifacts\install-appspec.ps1"
+      - Copy-Item "infrastructure/common/pipelines/before-appspec.ps1" -Destination "C:\codebuild\artifacts\before-appspec.ps1"
+
+artifacts:
+  files:
+    - '**/*'
+  base-directory: 'C:\codebuild\artifacts\'

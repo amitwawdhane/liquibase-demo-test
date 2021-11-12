@@ -1,0 +1,32 @@
+{
+    "Parameters": {
+        "Ec2Name": "xxxxxxD00301",
+        "BuildEnvironment":  "dev",
+        "ADDirectoryOU": "",
+        "ADDirectoryId":  "d-92670d9be4",
+        "ADDirectoryName": "devdot.state.az",
+        "ADDnsIpAddresses1": "10.166.75.235",
+        "ADDnsIpAddresses2": "10.166.135.240",
+        "SSLArn": "/sslcert/web/dev/domainacm/arn",
+        "ApplicationName": "xxxxxCamelCaseAppName" ,
+        "InstanceType":  "t3a.small", 
+        "BillingEmail": "cloudbilling+development-default@azdot.gov",
+        "VPCCidr" : "/server/compute/dev/vpc/vpccird",
+        "PrivateSubnetLBa": "/server/compute/dev/vpc/privatesubnet-dev-internallb-us-west-2a",
+        "PrivateSubnetLBb": "/server/compute/dev/vpc/privatesubnet-dev-internallb-us-west-2b",
+        "SubnetCompute": "/server/compute/dev/vpc/privatesubnet-internalweb-us-west-2a",
+        "SubnetCompute2": "/server/compute/dev/vpc/privatesubnet-internalweb-us-west-2b",
+        "VPCCompute": "/server/compute/dev/vpc/vpc" ,
+        "ApplicationSpecificBucket": "none",
+        "KeyPair": "webserver-dev-keypair-instancekey",
+        "TagTechnicalOwner": "itg-cloud",
+        "TagServiceType": "Application",
+        "TagServiceName": "web",
+        "TagOrchestration": "cloud-formation",
+        "TagExpectedTraffic": "internal_inbound",
+        "TagCostCenter": "xxxxxxawards-recognition",
+        "TagAvailablity": "xxxxxxxxxxx3_weeks_end_of_january",
+        "TagCustomer": "xxxxxxxxxxxx-awards-recognition",
+        "TagSchedule": "AlwaysOn"
+    }
+}
